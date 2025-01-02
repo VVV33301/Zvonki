@@ -1,6 +1,7 @@
 import sys
 import json
 from random import shuffle
+from os.path import exists
 
 from PyQt6.QtGui import *
 from PyQt6.QtWidgets import *
@@ -15,6 +16,9 @@ from pycaw.pycaw import AudioUtilities, IAudioEndpointVolume
 
 VERSION = '2.0.0'
 
+if not exists('config.json'):
+    with open('config.json', 'w') as f:
+        json.dump({"top_hint": True, "volume": 80, "playlist": []}, f)
 with open('config.json', encoding='utf-8') as config_file:
     config = json.load(config_file)
 

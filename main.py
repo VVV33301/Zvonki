@@ -14,11 +14,11 @@ from ctypes import cast, POINTER
 from comtypes import CLSCTX_ALL
 from pycaw.pycaw import AudioUtilities, IAudioEndpointVolume
 
-VERSION = '2.0.0'
+VERSION = '2.0.1'
 
 if not exists('config.json'):
     with open('config.json', 'w') as f:
-        json.dump({"top_hint": True, "volume": 80, "playlist": []}, f)
+        json.dump({"top_hint": True, "volume": 80, "playlist": [], "schedules": {}}, f)
 with open('config.json', encoding='utf-8') as config_file:
     config = json.load(config_file)
 
@@ -116,9 +116,6 @@ class Actions(QMenuBar):
         super().__init__(parent=parent)
         self.parent: MainWindow = parent
 
-        self.stop = QAction('Stop', self)
-        self.stop.triggered.connect(self.parent.player.stop)
-
         self.add = QAction('Add', self)
         self.add.triggered.connect(self.parent.open_songs)
 
@@ -127,6 +124,12 @@ class Actions(QMenuBar):
 
         self.remove_all = QAction('Remove All', self)
         self.remove_all.triggered.connect(self.parent.delete_all)
+
+        self.adds = QAction('Add', self)
+        self.adds.triggered.connect(self.parent.schedule.add)
+
+        self.rems = QAction('Remove', self)
+        self.rems.triggered.connect(lambda: self.parent.schedule.delete(self.parent.schedule.table.selectedItems()[0]))
 
         self.settings = QAction('Settings', self)
         self.settings.triggered.connect(self.parent.settings.exec)
@@ -147,6 +150,11 @@ class Actions(QMenuBar):
         self.sort_menu.addAction(self.by_alphabet)
         self.sort_menu.addAction(self.by_random)
         self.addMenu(self.sort_menu)
+
+        self.sch_menu = QMenu('Schedules', self)
+        self.sch_menu.addAction(self.adds)
+        self.sch_menu.addAction(self.rems)
+        self.addMenu(self.sch_menu)
 
         self.addAction(self.settings)
 
@@ -303,24 +311,74 @@ class AudioVisualization(QDockWidget):
 
 
 class ScheduleList(QListWidgetItem):
-    def __init__(self, name='Новый список', parent=None):
+    def __init__(self, name, lst, duration, parent=None):
         super().__init__(parent)
-        self.setFlags(Qt.ItemFlag.ItemIsUserCheckable)
+        self.setFlags(self.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+        self.setCheckState(Qt.CheckState.Unchecked)
         self.setText(name)
 
-        self.list = []
-        self.enabled = True
+        self.list = lst
+        self.duration = duration
+
+
+class ScheduleSettings(QDialog):
+    def __init__(self, item_data, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle(item_data.text())
+        self.item_data = item_data
+
+        lay = QVBoxLayout(self)
+        self.setLayout(lay)
+
+        self.table = QListWidget(self)
+        lay.addWidget(self.table)
+
+        self.duration = QSpinBox(self)
+        self.duration.setRange(5, 60)
+        self.duration.setValue(item_data.duration)
+        self.duration.setSingleStep(5)
+        self.duration.setPrefix('Duration: ')
+        self.duration.setSuffix('s')
+        self.duration.valueChanged.connect(self.change_duration)
+        lay.addWidget(self.duration)
+
+        self.load_list()
+
+    def load_list(self):
+        for x in self.item_data.list:
+            g = QListWidgetItem(self.table)
+            tm = QTimeEdit(self.table)
+            tm.setDisplayFormat('hh:mm:ss')
+            tm.timeChanged.connect(self.save_list)
+            tm.setTime(QTime.fromString(x))
+            self.table.addItem(g)
+            self.table.setItemWidget(g, tm)
+
+    def change_duration(self):
+        self.item_data.duration = self.duration.value()
+        config['schedules'][self.item_data.text()]['duration'] = self.duration.value()
+        save_config()
+
+    def save_list(self):
+        self.item_data.list.clear()
+        for i in self.table.findChildren(QTimeEdit):
+            self.item_data.list.append(i.time().toString('hh:mm:ss'))
+        config['schedules'][self.item_data.text()]['list'] = self.item_data.list
+        save_config()
 
 
 class Schedule(QDockWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.parent = parent
         self.setWindowTitle('Schedule')
         self.setMinimumWidth(170)
 
         self.table = QListWidget(self)
         self.table.setMovement(QListWidget.Movement.Snap)
         self.table.setDragDropMode(QListWidget.DragDropMode.InternalMove)
+        self.table.contextMenuEvent = self.right_clicked
+        self.table.itemDoubleClicked.connect(self.show_settings)
 
         self.setWidget(self.table)
         self.setAllowedAreas(Qt.DockWidgetArea.TopDockWidgetArea)
@@ -331,18 +389,57 @@ class Schedule(QDockWidget):
         self.timer.setInterval(1000)
         self.timer.start()
 
-    def add_schedule(self, name):
-        self.table.addItem(ScheduleList(name, self.table))
+    def add_schedule(self, item):
+        self.table.addItem(item)
 
-    def enable_schedule(self):
-        x = self.table.itemAt(self.cursor().pos())
+    def right_clicked(self, event):
+        x = self.table.itemAt(event.pos())
         if x:
-            if x.checkState() == Qt.CheckState.Checked:
-                pass
+            menu = QMenu(self.table)
+            edit = QAction('Edit', self.table)
+            edit.triggered.connect(lambda: self.show_settings(x))
+            copy = QAction('Copy', self.table)
+            copy.triggered.connect(lambda: self.copy(x))
+            delete = QAction('Delete', self.table)
+            delete.triggered.connect(lambda: self.delete(x))
+            menu.addActions([edit, copy, delete])
+            menu.popup(self.cursor().pos())
+            event.accept()
+        else:
+            event.ignore()
+
+    def show_settings(self, item):
+        sw = ScheduleSettings(item, self)
+        sw.show()
+
+    def add(self):
+        nm, _ = QInputDialog.getText(self, 'Add Schedule', 'Name')
+        if nm:
+            item = ScheduleList(nm, [], 20, self.table)
+            self.table.addItem(item)
+
+    def copy(self, item):
+        s = item.clone()
+        s.setText(s.text() + ' - Копия')
+        config['schedules'][s.text()] = {
+            "enabled": s.checkState() == Qt.CheckState.Checked, "duration": s.duration, "list": s.list}
+        self.table.addItem(s)
+        save_config()
+
+    def delete(self, item):
+        self.table.takeItem(item)
+        del config['schedules'][item.text()]
+        save_config()
 
     def run(self):
         if self.timer.isActive():
-            pass
+            for x in (self.table.item(i) for i in range(self.table.count())):
+                if x.checkState() == Qt.CheckState.Checked:
+                    print(x.text(), x.list, QTime.currentTime().toString())
+                    if QTime.currentTime().toString() in x.list:
+                        self.parent.player.play()
+                    elif QTime.currentTime().addSecs(-x.duration).toString() in x.list:
+                        self.parent.next_song()
 
 
 class MainWindow(QMainWindow):
@@ -369,7 +466,7 @@ class MainWindow(QMainWindow):
 
         self.table = PlaylistWidget(self)
         self.progress_bar = Progress(self)
-        self.visualize = AudioVisualization(self)
+        # self.visualize = AudioVisualization(self)
 
         self.volume_pr = VolumeSlider(self)
         self.volume_pr.slider.setValue(config['volume'])
@@ -380,10 +477,11 @@ class MainWindow(QMainWindow):
         self.addDockWidget(Qt.DockWidgetArea.TopDockWidgetArea, self.volume_pr)
         self.addDockWidget(Qt.DockWidgetArea.TopDockWidgetArea, self.table)
         self.addDockWidget(Qt.DockWidgetArea.TopDockWidgetArea, self.schedule)
-        self.addDockWidget(Qt.DockWidgetArea.TopDockWidgetArea, self.visualize)
+        # self.addDockWidget(Qt.DockWidgetArea.TopDockWidgetArea, self.visualize)
         self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self.progress_bar)
 
         self.load_playlist()
+        self.load_schedules()
 
     def add_song(self, song):
         self.table.add_item(song)
@@ -404,10 +502,6 @@ class MainWindow(QMainWindow):
                 self.player.play()
         else:
             self.player.pause()
-
-    def play_new(self):
-        self.player.setSource(self.table.get_song())
-        self.player.play()
 
     def repeat(self):
         self.is_repeat = not self.is_repeat
@@ -456,6 +550,14 @@ class MainWindow(QMainWindow):
         shuffle(config['playlist'])
         save_config()
         self.load_playlist()
+
+    def load_schedules(self):
+        for s in config['schedules'].keys():
+            item = ScheduleList(
+                s, config['schedules'][s]['list'], config['schedules'][s]['duration'], self.schedule.table)
+            if config['schedules'][s]['enabled']:
+                item.setCheckState(Qt.CheckState.Checked)
+            self.schedule.add_schedule(item)
 
     def dragEnterEvent(self, a0):
         if a0.mimeData().hasUrls():

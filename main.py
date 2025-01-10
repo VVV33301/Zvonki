@@ -8,13 +8,11 @@ from PyQt6.QtWidgets import *
 from PyQt6.QtCore import *
 from PyQt6.QtMultimedia import *
 
-# from librosa import load, amplitude_to_db
-
 from ctypes import cast, POINTER
 from comtypes import CLSCTX_ALL
 from pycaw.pycaw import AudioUtilities, IAudioEndpointVolume
 
-VERSION = '2.2.1'
+VERSION = '2.2.3'
 
 if not exists('config.json'):
     with open('config.json', 'w') as f:
@@ -76,7 +74,7 @@ class PlaylistWidget(QDockWidget):
     def __init__(self, parent=None):
         super().__init__(parent=parent)
         self.parent = parent
-        self.setWindowTitle('Playlist')
+        self.setWindowTitle('Плейлист')
         self.setMinimumWidth(300)
 
         self.table = QListWidget(self)
@@ -108,25 +106,25 @@ class Settings(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent=parent)
         self.parent = parent
-        self.setWindowTitle('Settings')
+        self.setWindowTitle('Настройки')
         self.setWindowModality(Qt.WindowModality.ApplicationModal)
 
         self.lay = QVBoxLayout()
         self.setLayout(self.lay)
 
-        self.info = QLabel('Version %s\n2025 Vladimir Varenik. All rights reserved' % VERSION)
+        self.info = QLabel('Версия %s\n2025 Владимир Вареник. Все права защищены.' % VERSION)
         self.lay.addWidget(self.info)
 
-        self.top_hint = QCheckBox('Top hint', self)
+        self.top_hint = QCheckBox('Поверх всех окон', self)
         self.top_hint.setChecked(config['top_hint'])
         self.top_hint.clicked.connect(self.top_hint_checked)
         self.lay.addWidget(self.top_hint)
 
-        self.docks_movable = QCheckBox('Docks movable', self)
+        self.docks_movable = QCheckBox('Передвижение окон', self)
         self.docks_movable.clicked.connect(self.docks_movable_checked)
         self.lay.addWidget(self.docks_movable)
 
-        self.autorun = QCheckBox('Autorun', self)
+        self.autorun = QCheckBox('Автозапуск', self)
         self.autorun.setChecked(config['autorun'])
         self.autorun.clicked.connect(self.set_autorun)
         self.lay.addWidget(self.autorun)
@@ -161,42 +159,42 @@ class Actions(QMenuBar):
         super().__init__(parent=parent)
         self.parent: MainWindow = parent
 
-        self.add = QAction('Add', self)
+        self.add = QAction('Добавить', self)
         self.add.triggered.connect(self.parent.open_songs)
 
-        self.remove = QAction('Remove', self)
+        self.remove = QAction('Удалить', self)
         self.remove.triggered.connect(self.parent.delete_song)
 
-        self.remove_all = QAction('Remove All', self)
+        self.remove_all = QAction('Удалить все', self)
         self.remove_all.triggered.connect(self.parent.delete_all)
 
-        self.adds = QAction('Add', self)
+        self.adds = QAction('Добавить', self)
         self.adds.triggered.connect(self.parent.schedule.add)
 
-        self.rems = QAction('Remove', self)
+        self.rems = QAction('Удалить', self)
         self.rems.triggered.connect(lambda: self.parent.schedule.delete(self.parent.schedule.table.selectedItems()[0]))
 
-        self.settings = QAction('Settings', self)
+        self.settings = QAction('Настройки', self)
         self.settings.triggered.connect(self.parent.settings.exec)
 
-        self.by_alphabet = QAction('By Alphabet', self)
+        self.by_alphabet = QAction('По алфавиту', self)
         self.by_alphabet.triggered.connect(self.parent.sort_by_alphabet)
 
-        self.by_random = QAction('By Random', self)
+        self.by_random = QAction('Случайно', self)
         self.by_random.triggered.connect(self.parent.sort_by_random)
 
-        self.s_menu = QMenu('Songs', self)
+        self.s_menu = QMenu('Песни', self)
         self.s_menu.addAction(self.add)
         self.s_menu.addAction(self.remove)
         self.s_menu.addAction(self.remove_all)
         self.addMenu(self.s_menu)
 
-        self.sort_menu = QMenu('Sort', self)
+        self.sort_menu = QMenu('Сортировка', self)
         self.sort_menu.addAction(self.by_alphabet)
         self.sort_menu.addAction(self.by_random)
         self.s_menu.addMenu(self.sort_menu)
 
-        self.sch_menu = QMenu('Schedules', self)
+        self.sch_menu = QMenu('Расписания', self)
         self.sch_menu.addAction(self.adds)
         self.sch_menu.addAction(self.rems)
         self.addMenu(self.sch_menu)
@@ -208,7 +206,7 @@ class VolumeSlider(QDockWidget):
     def __init__(self, parent=None):
         super().__init__(parent=parent)
         self.parent = parent
-        self.setWindowTitle('Volume')
+        self.setWindowTitle('Громкость')
 
         self.slider = QSlider(self)
         self.slider.setRange(0, 100)
@@ -239,7 +237,7 @@ class VolumeSlider(QDockWidget):
 class SystemVolumeSlider(VolumeSlider):
     def __init__(self, parent=None):
         super().__init__(parent=parent)
-        self.setWindowTitle('System')
+        self.setWindowTitle('Системная громкость')
 
         devices = AudioUtilities.GetSpeakers()
         interface = devices.Activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
@@ -253,7 +251,7 @@ class SystemVolumeSlider(VolumeSlider):
 class Progress(QDockWidget):
     def __init__(self, parent=None):
         super().__init__(parent=parent)
-        self.setWindowTitle('Not media loaded')
+        self.setWindowTitle('Медиа не загружено')
         self.parent = parent
         self.setMinimumHeight(60)
 
@@ -312,7 +310,7 @@ class AudioVisualization(QDockWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.parent = parent
-        self.setWindowTitle('Visualization')
+        self.setWindowTitle('Визуализация')
         self.setAllowedAreas(Qt.DockWidgetArea.TopDockWidgetArea)
         self.setFeatures(
             QDockWidget.DockWidgetFeature.DockWidgetMovable | QDockWidget.DockWidgetFeature.DockWidgetClosable)
@@ -346,12 +344,6 @@ class AudioVisualization(QDockWidget):
             self.value_right.setValue(-60)
 
     def set_data(self):
-        # try:
-        #     data, sample_rate = load(self.parent.player.source().url(), sr=None, mono=False)
-        # except Exception:
-        #     data, sample_rate = [[0], [0]], 1000
-        # self.data_left = amplitude_to_db(data[0][::sample_rate // 1000])
-        # self.data_right = amplitude_to_db(data[1][::sample_rate // 1000])
         pass
 
 
@@ -390,8 +382,8 @@ class ScheduleSettings(QDialog):
         self.duration.setRange(5, 60)
         self.duration.setValue(item_data.duration)
         self.duration.setSingleStep(5)
-        self.duration.setPrefix('Duration: ')
-        self.duration.setSuffix('s')
+        self.duration.setPrefix('Длительность: ')
+        self.duration.setSuffix('с')
         self.duration.valueChanged.connect(self.change_duration)
         lay.addWidget(self.duration)
 
@@ -416,11 +408,11 @@ class ScheduleSettings(QDialog):
     def right_clicked(self, event):
         x = self.table.itemAt(event.pos())
         menu = QMenu(self.table)
-        add = QAction('Add', self.table)
+        add = QAction('Добавить', self.table)
         add.triggered.connect(self.add)
         menu.addAction(add)
         if x:
-            delete = QAction('Delete', self.table)
+            delete = QAction('Удалить', self.table)
             delete.triggered.connect(self.delete)
             menu.addAction(delete)
         menu.popup(self.cursor().pos())
@@ -470,7 +462,7 @@ class Schedule(QDockWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.parent = parent
-        self.setWindowTitle('Schedule')
+        self.setWindowTitle('Расписание')
         self.setMinimumWidth(170)
 
         self.table = QListWidget(self)
@@ -495,11 +487,11 @@ class Schedule(QDockWidget):
         x = self.table.itemAt(event.pos())
         if x:
             menu = QMenu(self.table)
-            edit = QAction('Edit', self.table)
+            edit = QAction('Изменить', self.table)
             edit.triggered.connect(lambda: self.show_settings(x))
-            copy = QAction('Copy', self.table)
+            copy = QAction('Копировать', self.table)
             copy.triggered.connect(lambda: self.copy(x))
-            delete = QAction('Delete', self.table)
+            delete = QAction('Удалить', self.table)
             delete.triggered.connect(lambda: self.delete(x))
             menu.addActions([edit, copy, delete])
             menu.popup(self.cursor().pos())
@@ -512,7 +504,7 @@ class Schedule(QDockWidget):
         sw.show()
 
     def add(self):
-        nm, _ = QInputDialog.getText(self, 'Add Schedule', 'Name')
+        nm, _ = QInputDialog.getText(self, 'Добавить расписание', 'Имя')
         if nm:
             item = ScheduleList(nm, [], 20, '123456', self.table)
             self.table.addItem(item)
@@ -535,7 +527,6 @@ class Schedule(QDockWidget):
         if self.timer.isActive():
             for x in (self.table.item(i) for i in range(self.table.count())):
                 if x.checkState() == Qt.CheckState.Checked:
-                    # print(x.text(), x.list, QTime.currentTime().toString())
                     if QTime.currentTime().toString() in x.list and str(QDate.currentDate().dayOfWeek()) in x.days:
                         self.parent.player.play()
                     elif QTime.currentTime().addSecs(-x.duration).toString() in x.list:
@@ -566,7 +557,6 @@ class MainWindow(QMainWindow):
 
         self.table = PlaylistWidget(self)
         self.progress_bar = Progress(self)
-        # self.visualize = AudioVisualization(self)
 
         self.volume_pr = VolumeSlider(self)
         self.volume_pr.slider.setValue(config['volume'])
@@ -577,7 +567,6 @@ class MainWindow(QMainWindow):
         self.addDockWidget(Qt.DockWidgetArea.TopDockWidgetArea, self.volume_pr)
         self.addDockWidget(Qt.DockWidgetArea.TopDockWidgetArea, self.table)
         self.addDockWidget(Qt.DockWidgetArea.TopDockWidgetArea, self.schedule)
-        # self.addDockWidget(Qt.DockWidgetArea.TopDockWidgetArea, self.visualize)
         self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self.progress_bar)
 
         self.load_playlist()
@@ -595,7 +584,7 @@ class MainWindow(QMainWindow):
 
     def play(self):
         if not self.player.isPlaying():
-            s = QMessageBox.question(self, 'Do you want to play?', 'Do you want to play song now?',
+            s = QMessageBox.question(self, 'Воспроизвести?', 'Вы хотите воспроизвести песню сейчас?',
                                     QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
                                     QMessageBox.StandardButton.No)
             if s == QMessageBox.StandardButton.Yes:
@@ -617,14 +606,14 @@ class MainWindow(QMainWindow):
 
     def media_status(self, status):
         if status == QMediaPlayer.MediaStatus.InvalidMedia:
-            self.progress_bar.setWindowTitle('Invalid media. Please try again')
+            self.progress_bar.setWindowTitle('Неверный формат медиафайла. Попробуйте снова')
         if status == QMediaPlayer.MediaStatus.EndOfMedia:
             if not self.is_repeat:
                 self.next_song()
 
     def open_songs(self):
-        files, _ = QFileDialog.getOpenFileNames(self, 'Add Songs', '/',
-                                                'Supported media files(*.mp3 *.wav);;All Files (*.*)')
+        files, _ = QFileDialog.getOpenFileNames(self, 'Добавить песни', '/',
+                                                'Поддерживаемые форматы медиа (*.mp3 *.wav);;Все файлы (*.*)')
         if files:
             for file in files:
                 self.add_song(file)
@@ -638,8 +627,8 @@ class MainWindow(QMainWindow):
         save_config()
 
     def delete_all(self):
-        self.table.table.selectAll()
-        self.delete_song()
+        while self.table.table.count():
+            self.delete_song()
 
     def sort_by_alphabet(self):
         config['playlist'].sort()

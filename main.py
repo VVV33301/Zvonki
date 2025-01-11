@@ -1,3 +1,4 @@
+from os.path import join, dirname, abspath
 import sys
 import json
 from random import shuffle
@@ -12,17 +13,22 @@ from ctypes import cast, POINTER
 from comtypes import CLSCTX_ALL
 from pycaw.pycaw import AudioUtilities, IAudioEndpointVolume
 
-VERSION = '2.2.3'
+VERSION = '2.3.0'
 
-if not exists('config.json'):
-    with open('config.json', 'w') as f:
+
+def resource_path(relative_path):
+    return join(getattr(sys, '_MEIPASS', dirname(abspath(sys.argv[0]))), relative_path)
+
+
+if not exists(resource_path('config.json')):
+    with open(resource_path('config.json'), 'w') as f:
         json.dump({"top_hint": True, "autorun": False, "volume": 80, "playlist": [], "schedules": {}}, f)
-with open('config.json', encoding='utf-8') as config_file:
+with open(resource_path('config.json'), encoding='utf-8') as config_file:
     config = json.load(config_file)
 
 
 def save_config():
-    with open('config.json', 'w', encoding='utf-8') as config_file_w:
+    with open(resource_path('config.json'), 'w', encoding='utf-8') as config_file_w:
         json.dump(config, config_file_w, ensure_ascii=False)
 
 

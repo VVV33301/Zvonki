@@ -61,9 +61,19 @@ class DaysWidget(QWidget):
 
 
 class Delegate(QStyledItemDelegate):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.current = -1
+
+    def set_current(self, row):
+        self.current = row
+
     def initStyleOption(self, option, index):
         super().initStyleOption(option, index)
-        option.text = f"{index.row() + 1}. {option.text}"
+        if index.row() == self.current:
+            option.text = f">{index.row() + 1}. {option.text}"
+        else:
+            option.text = f"{index.row() + 1}. {option.text}"
 
 
 class PlaylistItem(QListWidgetItem):
@@ -83,8 +93,11 @@ class PlaylistWidget(QDockWidget):
         self.table = QListWidget(self)
         self.table.setMovement(QListWidget.Movement.Snap)
         self.table.setDragDropMode(QListWidget.DragDropMode.InternalMove)
-        self.table.setItemDelegate(Delegate(self.table))
         self.table.doubleClicked.connect(self.double_song)
+        self.table.indexesMoved.connect(save_config)
+
+        self.delegate = Delegate(self.table)
+        self.table.setItemDelegate(self.delegate)
 
         self.setWidget(self.table)
         self.setAllowedAreas(Qt.DockWidgetArea.TopDockWidgetArea)
@@ -95,10 +108,13 @@ class PlaylistWidget(QDockWidget):
 
     def double_song(self, ind):
         self.table.setCurrentIndex(ind)
+        self.delegate.set_current(ind.row())
+        self.update()
         self.parent.player.setSource(QUrl(self.get_song()))
 
     def change_song(self, num):
         self.table.setCurrentRow(num)
+        self.delegate.set_current(num)
         self.parent.player.setSource(QUrl(self.get_song()))
 
     def get_song(self):
@@ -433,7 +449,6 @@ class ScheduleSettings(QDialog):
         self.save_list()
 
     def delete(self):
-        del config['schedules'][self.item_data.text()]['list'][self.table.currentRow()]
         self.table.takeItem(self.table.currentRow())
         self.save_list()
 
@@ -456,7 +471,8 @@ class ScheduleSettings(QDialog):
     def save_list(self):
         self.item_data.list.clear()
         for i in self.table.findChildren(QTimeEdit):
-            self.item_data.list.append(i.time().toString('hh:mm:ss'))
+            if i.isVisible():
+                self.item_data.list.append(i.time().toString('hh:mm:ss'))
         config['schedules'][self.item_data.text()]['list'] = self.item_data.list
         save_config()
 

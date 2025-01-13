@@ -3,6 +3,8 @@ from os import mkdir
 import sys
 import json
 from random import shuffle
+import logging
+import traceback
 
 from PyQt6.QtGui import *
 from PyQt6.QtWidgets import *
@@ -13,8 +15,11 @@ from ctypes import cast, POINTER
 from comtypes import CLSCTX_ALL
 from pycaw.pycaw import AudioUtilities, IAudioEndpointVolume
 
-VERSION = '2.3.1'
+VERSION = '2.4.0'
 CONFIG_PATH = expanduser('~') + '/.zvonki2/config.json'
+
+logging.basicConfig(filename=expanduser('~') + '/.zvonki2/work.log', level=logging.INFO,
+                    format='%(asctime)s %(levelname)s - %(message)s')
 
 if not exists(CONFIG_PATH):
     mkdir(expanduser('~') + '/.zvonki2')
@@ -27,6 +32,7 @@ with open(CONFIG_PATH, encoding='utf-8') as config_file:
 def save_config():
     with open(CONFIG_PATH, 'w', encoding='utf-8') as config_file_w:
         json.dump(config, config_file_w, ensure_ascii=False)
+    logging.info('Updated config file')
 
 
 def mseconds_to_time(mseconds):
@@ -171,6 +177,7 @@ class Settings(QDialog):
             key.Close()
         config['autorun'] = self.autorun.isChecked()
         save_config()
+        logging.info(f'Autorun {"enabled" if self.autorun.isChecked() else "disabled"}')
 
 
 class Actions(QMenuBar):
@@ -447,10 +454,12 @@ class ScheduleSettings(QDialog):
         self.table.setItemWidget(g, tm)
         config['schedules'][self.item_data.text()]['list'].append('00:00:00')
         self.save_list()
+        logging.info('Add new item to list ' + self.item_data.text())
 
     def delete(self):
         self.table.takeItem(self.table.currentRow())
         self.save_list()
+        logging.info('Removed item from list ' + self.item_data.text())
 
     def change_text(self):
         config['schedules'][self.name.text()] = config['schedules'][self.item_data.text()].copy()
@@ -475,6 +484,7 @@ class ScheduleSettings(QDialog):
                 self.item_data.list.append(i.time().toString('hh:mm:ss'))
         config['schedules'][self.item_data.text()]['list'] = self.item_data.list
         save_config()
+        logging.warning('Saved list ' + self.item_data.text())
 
 
 class Schedule(QDockWidget):
@@ -543,13 +553,18 @@ class Schedule(QDockWidget):
         save_config()
 
     def run(self):
-        if self.timer.isActive():
-            for x in (self.table.item(i) for i in range(self.table.count())):
-                if x.checkState() == Qt.CheckState.Checked:
-                    if QTime.currentTime().toString() in x.list and str(QDate.currentDate().dayOfWeek()) in x.days:
-                        self.parent.player.play()
-                    elif QTime.currentTime().addSecs(-x.duration).toString() in x.list:
-                        self.parent.next_song()
+        try:
+            if self.timer.isActive():
+                for x in (self.table.item(i) for i in range(self.table.count())):
+                    if x.checkState() == Qt.CheckState.Checked:
+                        if QTime.currentTime().toString() in x.list and str(QDate.currentDate().dayOfWeek()) in x.days:
+                            self.parent.player.play()
+                            logging.info('Playing song, schedule ' + x.text())
+                        elif QTime.currentTime().addSecs(-x.duration).toString() in x.list:
+                            self.parent.next_song()
+                            logging.info('Stop song, schedule ' + x.text())
+        except Exception:
+            logging.critical(traceback.format_exc())
 
 
 class MainWindow(QMainWindow):
@@ -685,6 +700,7 @@ class MainWindow(QMainWindow):
             else:
                 config['schedules'][x.text()]['enabled'] = False
         save_config()
+        logging.warning('Closing program')
 
 
 if __name__ == '__main__':

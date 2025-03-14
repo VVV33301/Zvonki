@@ -15,7 +15,7 @@ from ctypes import cast, POINTER
 from comtypes import CLSCTX_ALL
 from pycaw.pycaw import AudioUtilities, IAudioEndpointVolume
 
-VERSION = '2.4.0'
+VERSION = '2.6.0'
 CONFIG_PATH = expanduser('~') + '/.zvonki2/config.json'
 
 logging.basicConfig(filename=expanduser('~') + '/.zvonki2/work.log', level=logging.INFO,
@@ -100,7 +100,6 @@ class PlaylistWidget(QDockWidget):
         self.table.setMovement(QListWidget.Movement.Snap)
         self.table.setDragDropMode(QListWidget.DragDropMode.InternalMove)
         self.table.doubleClicked.connect(self.double_song)
-        self.table.indexesMoved.connect(save_config)
 
         self.delegate = Delegate(self.table)
         self.table.setItemDelegate(self.delegate)
@@ -227,6 +226,10 @@ class Actions(QMenuBar):
 
         self.addAction(self.settings)
 
+        self.exit = QAction('Выход', self)
+        self.exit.triggered.connect(self.parent.close_program)
+        self.addAction(self.exit)
+
 
 class VolumeSlider(QDockWidget):
     def __init__(self, parent=None):
@@ -332,47 +335,6 @@ class Progress(QDockWidget):
         self.duration.setText(mseconds_to_time(tm))
 
 
-class AudioVisualization(QDockWidget):
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.parent = parent
-        self.setWindowTitle('Визуализация')
-        self.setAllowedAreas(Qt.DockWidgetArea.TopDockWidgetArea)
-        self.setFeatures(
-            QDockWidget.DockWidgetFeature.DockWidgetMovable | QDockWidget.DockWidgetFeature.DockWidgetClosable)
-        self.setMinimumWidth(80)
-        self.setMaximumWidth(120)
-
-        self.wgt = QWidget(self)
-        self.wgtlay = QHBoxLayout()
-        self.wgt.setLayout(self.wgtlay)
-        self.setWidget(self.wgt)
-
-        self.value_left = QProgressBar(self)
-        self.value_left.setOrientation(Qt.Orientation.Vertical)
-        self.value_left.setRange(-60, 0)
-        self.wgtlay.addWidget(self.value_left)
-
-        self.value_right = QProgressBar(self)
-        self.value_right.setOrientation(Qt.Orientation.Vertical)
-        self.value_right.setRange(-60, 0)
-        self.wgtlay.addWidget(self.value_right)
-
-        self.parent.player.sourceChanged.connect(self.set_data)
-        self.parent.player.positionChanged.connect(self.update_data)
-
-    def update_data(self, pos):
-        try:
-            self.value_left.setValue(int(self.data_left[pos]))
-            self.value_right.setValue(int(self.data_right[pos]))
-        except Exception:
-            self.value_left.setValue(-60)
-            self.value_right.setValue(-60)
-
-    def set_data(self):
-        pass
-
-
 class ScheduleList(QListWidgetItem):
     def __init__(self, name, lst, duration, days, parent=None):
         super().__init__(parent)
@@ -417,16 +379,21 @@ class ScheduleSettings(QDialog):
         self.days.clicked.connect(self.change_days)
         lay.addWidget(self.days)
 
+        self.save_timer = QTimer(self)
+        self.save_timer.setInterval(3000)
+        self.save_timer.timeout.connect(self.save_list)
+
         self.load_list()
 
     def load_list(self):
+        self.table.clear()
         for x in self.item_data.list:
             g = QListWidgetItem(self.table)
             tm = QTimeEdit(self.table)
             tm.setDisplayFormat('hh:mm:ss')
             tm.wheelEvent = lambda e: e.ignore()
             tm.setTime(QTime.fromString(x))
-            tm.timeChanged.connect(self.save_list)
+            tm.timeChanged.connect(self.save_timer.start)
             tm.contextMenuEvent = self.right_clicked
             self.table.addItem(g)
             self.table.setItemWidget(g, tm)
@@ -448,7 +415,7 @@ class ScheduleSettings(QDialog):
         g = QListWidgetItem(self.table)
         tm = QTimeEdit(self.table)
         tm.setDisplayFormat('hh:mm:ss')
-        tm.timeChanged.connect(self.save_list)
+        tm.timeChanged.connect(self.save_timer.start)
         tm.contextMenuEvent = self.right_clicked
         self.table.addItem(g)
         self.table.setItemWidget(g, tm)
@@ -478,13 +445,19 @@ class ScheduleSettings(QDialog):
         save_config()
 
     def save_list(self):
+        self.save_timer.stop()
         self.item_data.list.clear()
         for i in self.table.findChildren(QTimeEdit):
             if i.isVisible():
                 self.item_data.list.append(i.time().toString('hh:mm:ss'))
+        self.item_data.list.sort()
         config['schedules'][self.item_data.text()]['list'] = self.item_data.list
         save_config()
         logging.warning('Saved list ' + self.item_data.text())
+        self.load_list()
+
+    def closeEvent(self, event):
+        self.save_list()
 
 
 class Schedule(QDockWidget):
@@ -506,7 +479,7 @@ class Schedule(QDockWidget):
 
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.run)
-        self.timer.setInterval(1000)
+        self.timer.setInterval(200)
         self.timer.start()
 
     def add_schedule(self, item):
@@ -556,13 +529,13 @@ class Schedule(QDockWidget):
         try:
             if self.timer.isActive():
                 for x in (self.table.item(i) for i in range(self.table.count())):
-                    if x.checkState() == Qt.CheckState.Checked:
-                        if QTime.currentTime().toString() in x.list and str(QDate.currentDate().dayOfWeek()) in x.days:
-                            self.parent.player.play()
-                            logging.info('Playing song, schedule ' + x.text())
-                        elif QTime.currentTime().addSecs(-x.duration).toString() in x.list:
+                    if x.checkState() == Qt.CheckState.Checked and str(QDate.currentDate().dayOfWeek()) in x.days:
+                        if self.parent.player.position() // 1000 == x.duration:
                             self.parent.next_song()
                             logging.info('Stop song, schedule ' + x.text())
+                        elif QTime.currentTime().toString() in x.list and not self.parent.player.isPlaying():
+                            self.parent.player.play()
+                            logging.info('Playing song, schedule ' + x.text())
         except Exception:
             logging.critical(traceback.format_exc())
 
@@ -605,6 +578,16 @@ class MainWindow(QMainWindow):
 
         self.load_playlist()
         self.load_schedules()
+
+        self.tray = QSystemTrayIcon(self.windowIcon(), self)
+        tray_menu = QMenu(self)
+        show_btn = QAction('Открыть', tray_menu)
+        show_btn.triggered.connect(self.show)
+        tray_menu.addActions([show_btn, self.menu.exit])
+        self.tray.setContextMenu(tray_menu)
+        self.tray.activated.connect(lambda e: self.show() if e == QSystemTrayIcon.ActivationReason.Trigger else None)
+        self.tray.show()
+        self.tray.showMessage('Программа запущена!', 'Zvonki2 успешно запущена и находится в режиме ожидания')
 
     def add_song(self, song):
         self.table.add_item(song)
@@ -683,6 +666,21 @@ class MainWindow(QMainWindow):
                 item.setCheckState(Qt.CheckState.Checked)
             self.schedule.add_schedule(item)
 
+    def save_base_config(self):
+        config['volume'] = self.volume_pr.slider.value()
+        config['playlist'] = [self.table.table.item(i).url for i in range(self.table.table.count())]
+        for x in (self.schedule.table.item(i) for i in range(self.schedule.table.count())):
+            if x.checkState() == Qt.CheckState.Checked:
+                config['schedules'][x.text()]['enabled'] = True
+            else:
+                config['schedules'][x.text()]['enabled'] = False
+        save_config()
+
+    def close_program(self):
+        self.save_base_config()
+        logging.warning('Closing program')
+        sys.exit()
+
     def dragEnterEvent(self, a0):
         if a0.mimeData().hasUrls():
             a0.accept()
@@ -693,18 +691,14 @@ class MainWindow(QMainWindow):
             config['playlist'].append(url)
 
     def closeEvent(self, event):
-        config['volume'] = self.volume_pr.slider.value()
-        for x in (self.schedule.table.item(i) for i in range(self.schedule.table.count())):
-            if x.checkState() == Qt.CheckState.Checked:
-                config['schedules'][x.text()]['enabled'] = True
-            else:
-                config['schedules'][x.text()]['enabled'] = False
-        save_config()
-        logging.warning('Closing program')
+        self.save_base_config()
+        self.hide()
+        event.ignore()
 
 
 if __name__ == '__main__':
     app = QApplication(sys.argv)
+    app.setWindowIcon(QIcon.fromTheme(QIcon.ThemeIcon.AudioCard))
     window = MainWindow()
     window.show()
     sys.exit(app.exec())

@@ -100,6 +100,7 @@ class PlaylistWidget(QDockWidget):
         self.table.setMovement(QListWidget.Movement.Snap)
         self.table.setDragDropMode(QListWidget.DragDropMode.InternalMove)
         self.table.doubleClicked.connect(self.double_song)
+        self.table.model().rowsMoved.connect(self.save_list)
 
         self.delegate = Delegate(self.table)
         self.table.setItemDelegate(self.delegate)
@@ -107,6 +108,10 @@ class PlaylistWidget(QDockWidget):
         self.setWidget(self.table)
         self.setAllowedAreas(Qt.DockWidgetArea.TopDockWidgetArea)
         self.setFeatures(QDockWidget.DockWidgetFeature.DockWidgetMovable)
+
+    def save_list(self):
+        config['playlist'] = [self.table.item(i).url for i in range(self.table.count())]
+        save_config()
 
     def add_item(self, url):
         self.table.addItem(PlaylistItem(url))
@@ -587,7 +592,6 @@ class MainWindow(QMainWindow):
         self.tray.setContextMenu(tray_menu)
         self.tray.activated.connect(lambda e: self.show() if e == QSystemTrayIcon.ActivationReason.Trigger else None)
         self.tray.show()
-        self.tray.showMessage('Программа запущена!', 'Zvonki2 успешно запущена и находится в режиме ожидания')
 
     def add_song(self, song):
         self.table.add_item(song)
@@ -668,7 +672,6 @@ class MainWindow(QMainWindow):
 
     def save_base_config(self):
         config['volume'] = self.volume_pr.slider.value()
-        config['playlist'] = [self.table.table.item(i).url for i in range(self.table.table.count())]
         for x in (self.schedule.table.item(i) for i in range(self.schedule.table.count())):
             if x.checkState() == Qt.CheckState.Checked:
                 config['schedules'][x.text()]['enabled'] = True

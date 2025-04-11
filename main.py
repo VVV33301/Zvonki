@@ -1,21 +1,22 @@
-from os.path import expanduser, exists
-from os import mkdir
+from os.path import expanduser, exists, basename
+from os import mkdir, getpid
 import sys
 import json
 from random import shuffle
 import logging
-import traceback
 
 from PyQt6.QtGui import *
 from PyQt6.QtWidgets import *
 from PyQt6.QtCore import *
 from PyQt6.QtMultimedia import *
 
+import psutil
+
 from ctypes import cast, POINTER
 from comtypes import CLSCTX_ALL
 from pycaw.pycaw import AudioUtilities, IAudioEndpointVolume
 
-VERSION = '2.6.0'
+VERSION = '2.7.0'
 CONFIG_PATH = expanduser('~') + '/.zvonki2/config.json'
 
 logging.basicConfig(filename=expanduser('~') + '/.zvonki2/work.log', level=logging.INFO,
@@ -24,7 +25,8 @@ logging.basicConfig(filename=expanduser('~') + '/.zvonki2/work.log', level=loggi
 if not exists(CONFIG_PATH):
     mkdir(expanduser('~') + '/.zvonki2')
     with open(CONFIG_PATH, 'w') as f:
-        json.dump({"top_hint": True, "autorun": False, "volume": 80, "playlist": [], "schedules": {}}, f)
+        json.dump({"top_hint": True, "sort_restart": False, "autorun": False,
+                   "volume": 80, "playlist": [], "schedules": {}}, f)
 with open(CONFIG_PATH, encoding='utf-8') as config_file:
     config = json.load(config_file)
 
@@ -39,6 +41,19 @@ def mseconds_to_time(mseconds):
     hh, mm, ss = str(mseconds // 3600000).rjust(2, '0'), str((mseconds % 3600000) // 60000).rjust(2, '0'), str(
         mseconds % 60000 // 1000).rjust(2, '0')
     return hh + ':' + mm + ':' + ss if hh != '00' else mm + ':' + ss
+
+
+def is_already_running():
+    current_pid = getpid()
+    script_name = basename(sys.argv[0])
+    count = 0
+    for proc in psutil.process_iter(['pid', 'name']):
+        try:
+            if proc.info['name'] == script_name and proc.info['pid'] != current_pid:
+                count += 1
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            pass
+    return count > 1
 
 
 class DaysWidget(QWidget):
@@ -144,6 +159,11 @@ class Settings(QDialog):
         self.info = QLabel('Версия %s\n2025 Владимир Вареник. Все права защищены.' % VERSION)
         self.lay.addWidget(self.info)
 
+        self.sort_restart = QCheckBox('Сортировка при запуске', self)
+        self.sort_restart.setChecked(config['sort_restart'])
+        self.sort_restart.clicked.connect(self.sort_on_restart)
+        self.lay.addWidget(self.sort_restart)
+
         self.top_hint = QCheckBox('Поверх всех окон', self)
         self.top_hint.setChecked(config['top_hint'])
         self.top_hint.clicked.connect(self.top_hint_checked)
@@ -157,6 +177,10 @@ class Settings(QDialog):
         self.autorun.setChecked(config['autorun'])
         self.autorun.clicked.connect(self.set_autorun)
         self.lay.addWidget(self.autorun)
+
+    def sort_on_restart(self):
+        config['sort_restart'] = self.sort_restart.isChecked()
+        save_config()
 
     def top_hint_checked(self):
         config['top_hint'] = self.top_hint.isChecked()
@@ -256,7 +280,7 @@ class VolumeSlider(QDockWidget):
         self.setFeatures(
             QDockWidget.DockWidgetFeature.DockWidgetMovable | QDockWidget.DockWidgetFeature.DockWidgetClosable)
 
-        self.setMinimumWidth(65)
+        self.setMinimumWidth(45)
         self.setMaximumWidth(90)
         self.slider.setMaximumWidth(90)
 
@@ -541,8 +565,8 @@ class Schedule(QDockWidget):
                         elif QTime.currentTime().toString() in x.list and not self.parent.player.isPlaying():
                             self.parent.player.play()
                             logging.info('Playing song, schedule ' + x.text())
-        except Exception:
-            logging.critical(traceback.format_exc())
+        except Exception as e:
+            logging.critical('Critical error - ' + str(e))
 
 
 class MainWindow(QMainWindow):
@@ -581,7 +605,10 @@ class MainWindow(QMainWindow):
         self.addDockWidget(Qt.DockWidgetArea.TopDockWidgetArea, self.schedule)
         self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self.progress_bar)
 
-        self.load_playlist()
+        if config['sort_restart']:
+            self.sort_by_random()
+        else:
+            self.load_playlist()
         self.load_schedules()
 
         self.tray = QSystemTrayIcon(self.windowIcon(), self)
@@ -590,7 +617,6 @@ class MainWindow(QMainWindow):
         show_btn.triggered.connect(self.show)
         tray_menu.addActions([show_btn, self.menu.exit])
         self.tray.setContextMenu(tray_menu)
-        self.tray.activated.connect(lambda e: self.show() if e == QSystemTrayIcon.ActivationReason.Trigger else None)
         self.tray.show()
 
     def add_song(self, song):
@@ -702,6 +728,9 @@ class MainWindow(QMainWindow):
 if __name__ == '__main__':
     app = QApplication(sys.argv)
     app.setWindowIcon(QIcon.fromTheme(QIcon.ThemeIcon.AudioCard))
+    if is_already_running():
+        msg = QMessageBox().question(None, 'Внимание!', 'Программа уже запущена!')
+        sys.exit()
     window = MainWindow()
     window.show()
     sys.exit(app.exec())

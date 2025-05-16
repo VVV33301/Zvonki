@@ -526,6 +526,8 @@ class Schedule(QDockWidget):
         self.timer.setInterval(200)
         self.timer.start()
 
+        self.current = None
+
     def add_schedule(self, item):
         self.table.addItem(item)
 
@@ -570,14 +572,17 @@ class Schedule(QDockWidget):
 
     def run(self):
         try:
-            if self.timer.isActive():
+            if self.parent.player.isPlaying():
+                if self.parent.player.position() // 1000 == self.current.duration:
+                    self.parent.next_song()
+                    self.current = None
+                    logging.info('Stop song, schedule ' + self.current.text())
+            elif self.timer.isActive():
                 for x in (self.table.item(i) for i in range(self.table.count())):
                     if x.checkState() == Qt.CheckState.Checked and str(QDate.currentDate().dayOfWeek()) in x.days:
-                        if self.parent.player.position() // 1000 == x.duration:
-                            self.parent.next_song()
-                            logging.info('Stop song, schedule ' + x.text())
-                        elif QTime.currentTime().toString() in x.list and not self.parent.player.isPlaying():
+                        if QTime.currentTime().toString() in x.list and not self.parent.player.isPlaying():
                             self.parent.player.play()
+                            self.current = x
                             logging.info('Playing song, schedule ' + x.text())
         except Exception as e:
             logging.critical('Critical error - ' + str(e))

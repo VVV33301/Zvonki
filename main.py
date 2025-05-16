@@ -16,11 +16,8 @@ from ctypes import cast, POINTER
 from comtypes import CLSCTX_ALL
 from pycaw.pycaw import AudioUtilities, IAudioEndpointVolume
 
-VERSION = '2.7.0'
+VERSION = '2.8.0'
 CONFIG_PATH = expanduser('~') + '/.zvonki2/config.json'
-
-logging.basicConfig(filename=expanduser('~') + '/.zvonki2/work.log', level=logging.INFO,
-                    format='%(asctime)s %(levelname)s - %(message)s')
 
 if not exists(CONFIG_PATH):
     mkdir(expanduser('~') + '/.zvonki2')
@@ -29,6 +26,9 @@ if not exists(CONFIG_PATH):
                    "volume": 80, "playlist": [], "schedules": {}}, f)
 with open(CONFIG_PATH, encoding='utf-8') as config_file:
     config = json.load(config_file)
+
+logging.basicConfig(filename=expanduser('~') + '/.zvonki2/work.log', level=logging.INFO,
+                    format='%(asctime)s %(levelname)s - %(message)s')
 
 
 def save_config():
@@ -116,6 +116,7 @@ class PlaylistWidget(QDockWidget):
         self.table.setDragDropMode(QListWidget.DragDropMode.InternalMove)
         self.table.doubleClicked.connect(self.double_song)
         self.table.model().rowsMoved.connect(self.save_list)
+        self.table.contextMenuEvent = self.right_clicked
 
         self.delegate = Delegate(self.table)
         self.table.setItemDelegate(self.delegate)
@@ -130,6 +131,20 @@ class PlaylistWidget(QDockWidget):
 
     def add_item(self, url):
         self.table.addItem(PlaylistItem(url))
+
+    def right_clicked(self, event):
+        x = self.table.itemAt(event.pos())
+        if x:
+            menu = QMenu(self.table)
+            delete = QAction('Удалить', self.table)
+            delete.triggered.connect(lambda: self.delete(x))
+            menu.addAction(delete)
+            menu.popup(self.cursor().pos())
+            event.accept()
+
+    def delete(self, song):
+        config['playlist'].remove(song.url)
+        self.table.takeItem(self.table.row(song))
 
     def double_song(self, ind):
         self.table.setCurrentIndex(ind)
@@ -542,11 +557,10 @@ class Schedule(QDockWidget):
             config['schedules'][nm] = {"enabled": False, "duration": 20, "list": [], "days": "123456"}
 
     def copy(self, item):
-        s = item.clone()
-        s.setText(s.text() + ' - Копия')
+        s = ScheduleList(item.text() + ' - Копия', item.list, item.duration, item.days, self.table)
+        self.table.addItem(s)
         config['schedules'][s.text()] = {
             "enabled": s.checkState() == Qt.CheckState.Checked, "duration": s.duration, "list": s.list, "days": s.days}
-        self.table.addItem(s)
         save_config()
 
     def delete(self, item):

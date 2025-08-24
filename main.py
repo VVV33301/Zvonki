@@ -5,10 +5,12 @@ import json
 from random import shuffle
 import logging
 
-from PyQt6.QtGui import *
-from PyQt6.QtWidgets import *
-from PyQt6.QtCore import *
-from PyQt6.QtMultimedia import *
+from PyQt6.QtGui import QAction, QIcon
+from PyQt6.QtWidgets import QApplication, QWidget, QListWidget, QListWidgetItem, QHBoxLayout, QVBoxLayout, QCheckBox, \
+    QPushButton, QGridLayout, QDockWidget, QStyledItemDelegate, QMenu, QMessageBox, QDialog, QFileDialog, QLabel, \
+    QMenuBar, QSlider, QMainWindow, QTimeEdit, QLineEdit, QInputDialog, QSpinBox, QSystemTrayIcon
+from PyQt6.QtCore import Qt, QUrl, QTime, QTimer, QDate, pyqtSignal
+from PyQt6.QtMultimedia import QMediaPlayer, QAudioOutput, QAudioDecoder
 
 import psutil
 
@@ -16,7 +18,7 @@ from ctypes import cast, POINTER
 from comtypes import CLSCTX_ALL
 from pycaw.pycaw import AudioUtilities, IAudioEndpointVolume
 
-VERSION = '2.8.0'
+VERSION = '2.9.0'
 CONFIG_PATH = expanduser('~') + '/.zvonki2/config.json'
 
 if not exists(CONFIG_PATH):
@@ -651,8 +653,8 @@ class MainWindow(QMainWindow):
     def play(self):
         if not self.player.isPlaying():
             s = QMessageBox.question(self, 'Воспроизвести?', 'Вы хотите воспроизвести песню сейчас?',
-                                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                                    QMessageBox.StandardButton.No)
+                                     QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                                     QMessageBox.StandardButton.No)
             if s == QMessageBox.StandardButton.Yes:
                 self.player.play()
         else:
@@ -679,7 +681,9 @@ class MainWindow(QMainWindow):
 
     def open_songs(self):
         files, _ = QFileDialog.getOpenFileNames(self, 'Добавить песни', '/',
-                                                'Поддерживаемые форматы медиа (*.mp3 *.wav);;Все файлы (*.*)')
+            'Аудиофайлы (*.mp3 *.wav *.ogg *.aac *.wma *.flac *.m4a *.ac3 *.eac3 *.alac *.opus);;'
+            'Видеофайлы (*.mp4 *.avi *.mkv *.wmv *.mov *.webm *.mpeg *.mpg *.vob *.ts *.m2ts *.3gp *.3g2 *.flv);;'
+            'Все файлы (*.*)')
         if files:
             for file in files:
                 self.add_song(file)

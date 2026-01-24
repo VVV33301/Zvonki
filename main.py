@@ -1,3 +1,4 @@
+from __future__ import annotations
 from os.path import expanduser, exists, basename, join, dirname, abspath
 from os import mkdir, getpid
 import sys
@@ -6,34 +7,33 @@ from random import shuffle
 from re import findall
 import logging
 from typing import List, Dict, Union, Optional, Any
-from PyQt6.QtGui import QAction, QIcon
+from PyQt6.QtGui import QAction, QIcon, QCloseEvent, QDropEvent, QDragEnterEvent
 from PyQt6.QtWidgets import QApplication, QWidget, QListWidget, QListWidgetItem, QHBoxLayout, QVBoxLayout, QCheckBox, \
     QPushButton, QGridLayout, QDockWidget, QStyledItemDelegate, QMenu, QMessageBox, QDialog, QFileDialog, QLabel, \
-    QMenuBar, QSlider, QMainWindow, QTimeEdit, QLineEdit, QInputDialog, QSpinBox, QSystemTrayIcon, QTextEdit
+    QMenuBar, QSlider, QMainWindow, QTimeEdit, QLineEdit, QInputDialog, QSpinBox, QSystemTrayIcon, QTextEdit, \
+    QDateEdit, QComboBox
 from PyQt6.QtCore import Qt, QUrl, QTime, QTimer, QDate, pyqtSignal
 from PyQt6.QtMultimedia import QMediaPlayer, QAudioOutput, QAudioDecoder
 import psutil
-from ctypes import cast, POINTER
-from comtypes import CLSCTX_ALL
-from pycaw.pycaw import AudioUtilities, IAudioEndpointVolume
+from pycaw.pycaw import AudioUtilities
 
-# Версия приложения
-VERSION: str = '2.9.0'
-# Путь к файлу конфигурации
+VERSION: str = '2.10.1'
 CONFIG_PATH: str = expanduser('~') + '/.zvonki2/config.json'
+SUPPORTED_FILES: str = ('Аудиофайлы (*.mp3 *.wav *.ogg *.aac *.wma *.flac *.m4a *.ac3 *.eac3 *.alac *.opus);;'
+                        'Видеофайлы (*.mp4 *.avi *.mkv *.wmv *.mov *.webm *.mpeg *.mpg *.vob *.ts *.m2ts '
+                        '*.3gp *.3g2 *.flv);;Все файлы (*.*)')
 
 # Создание директории и файла конфигурации, если они не существуют
 if not exists(CONFIG_PATH):
     mkdir(expanduser('~') + '/.zvonki2')
     with open(CONFIG_PATH, 'w', encoding='utf-8') as f:
         json.dump({"top_hint": True, "sort_restart": False, "autorun": False,
-                   "volume": 80, "playlist": [], "schedules": {}}, f)
+                   "volume": 80, "playlist": [], "schedules": {}, "timed_playlist": []}, f)
 
 # Загрузка конфигурации из файла
 with open(CONFIG_PATH, encoding='utf-8') as config_file:
     config: Dict[str, Union[str, int, bool, List[Union[str, List[str]]], Dict[str, Any]]] = json.load(config_file)
 
-# Настройка логирования
 logging.basicConfig(filename=expanduser('~') + '/.zvonki2/work.log', level=logging.INFO,
                     format='%(asctime)s %(levelname)s - %(message)s')
 
@@ -97,6 +97,13 @@ class DaysWidget(QWidget):
                 s += i.data
         self.clicked.emit(s)
 
+    def get_days(self) -> str:
+        s: str = ''
+        for i in self.findChildren(QCheckBox):
+            if i.isChecked():
+                s += i.data
+        return s
+
 
 class ImportText(QDialog):
     """Диалог для импорта расписания из текста."""
@@ -116,9 +123,13 @@ class ImportText(QDialog):
                                          'Формат не важен, главное, чтобы время было в формате hh:mm или hh:mm:ss')
         self.layout.addWidget(self.textarea)
 
-        self.enter: QPushButton = QPushButton('Импорт', self)
-        self.enter.clicked.connect(self.accept)
-        self.layout.addWidget(self.enter)
+        self.enter_btn: QPushButton = QPushButton('Импорт', self)
+        self.enter_btn.clicked.connect(self.enter)
+        self.layout.addWidget(self.enter_btn)
+
+    def enter(self):
+        if self.name.text():
+            self.accept()
 
     def output(self) -> tuple[str, List[str]]:
         """Возвращает имя и отсортированный список времен из текстового поля."""
@@ -293,7 +304,7 @@ class Settings(QDialog):
 class Actions(QMenuBar):
     """Меню приложения с действиями."""
 
-    def __init__(self, parent: Optional[QWidget] = None) -> None:
+    def __init__(self, parent: MainWindow = None) -> None:
         super().__init__(parent=parent)
         self.parent: MainWindow = parent
 
@@ -305,6 +316,9 @@ class Actions(QMenuBar):
 
         self.adds: QAction = QAction('Добавить', self)
         self.adds.triggered.connect(self.parent.schedule.add)
+
+        self.timed_add: QAction = QAction('Добавить по времени', self)
+        self.timed_add.triggered.connect(self.parent.timed_playlist.add)
 
         self.imps: QAction = QAction('Импорт из текста', self)
         self.imps.triggered.connect(self.parent.schedule.import_text)
@@ -330,6 +344,7 @@ class Actions(QMenuBar):
 
         self.sch_menu: QMenu = QMenu('Расписания', self)
         self.sch_menu.addAction(self.adds)
+        self.sch_menu.addAction(self.timed_add)
         self.sch_menu.addAction(self.imps)
         self.addMenu(self.sch_menu)
 
@@ -384,8 +399,7 @@ class SystemVolumeSlider(VolumeSlider):
         self.setWindowTitle('Системная громкость')
 
         devices = AudioUtilities.GetSpeakers()
-        interface = devices.Activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
-        self.volume_object = cast(interface, POINTER(IAudioEndpointVolume))
+        self.volume_object = devices.EndpointVolume
 
     def value_changed(self) -> None:
         """Обновляет системную громкость и отображает значение."""
@@ -662,7 +676,7 @@ class Schedule(QDockWidget):
         """Импортирует расписание из текста."""
         it: ImportText = ImportText(self.parent)
         it.exec()
-        if (out := it.output()) is not None:
+        if (out := it.output())[0]:
             item: ScheduleList = ScheduleList(out[0], out[1], 20, '123456', self.table)
             self.table.addItem(item)
             config['schedules'][out[0]] = {"enabled": False, "duration": 20, "list": out[1], "days": "123456"}
@@ -700,6 +714,276 @@ class Schedule(QDockWidget):
             logging.critical('Critical error - ' + str(e))
 
 
+class TimedImportDialog(QDialog):
+    """Диалог для импорта файла с указанием даты и времени воспроизведения."""
+
+    def __init__(self, parent: Optional[QWidget] = None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle('Импорт файла с временем воспроизведения')
+        self.setMinimumWidth(300)
+
+        layout: QGridLayout = QGridLayout(self)
+        self.setLayout(layout)
+
+        self.file_line: QLineEdit = QLineEdit(self)
+        self.file_line.setPlaceholderText('Путь к файлу')
+        layout.addWidget(self.file_line, 0, 0, 1, 3)
+
+        browse_btn: QPushButton = QPushButton('Обзор', self)
+        browse_btn.clicked.connect(self.browse_file)
+        layout.addWidget(browse_btn, 0, 3, 1, 1)
+
+        self.choose_mode = QComboBox(self)
+        self.choose_mode.addItem('Один раз')
+        self.choose_mode.addItem('Повторять')
+        self.choose_mode.currentTextChanged.connect(self.set_mode)
+        layout.addWidget(self.choose_mode, 1, 0, 1, 2)
+
+        date_label: QLabel = QLabel('Дата:', self)
+        layout.addWidget(date_label, 2, 0, 1, 1)
+        self.date_edit: QDateEdit = QDateEdit(self)
+        self.date_edit.setDate(QDate.currentDate())
+        layout.addWidget(self.date_edit, 2, 1, 1, 3)
+
+        time_label: QLabel = QLabel('Время:', self)
+        layout.addWidget(time_label, 3, 0, 1, 1)
+        self.time_edit: QTimeEdit = QTimeEdit(self)
+        self.time_edit.setTime(QTime.currentTime())
+        self.time_edit.setDisplayFormat('HH:mm:ss')
+        layout.addWidget(self.time_edit, 3, 1, 1, 3)
+
+        days_label: QLabel = QLabel('Дни:', self)
+        layout.addWidget(days_label, 4, 0, 1, 1)
+        self.days: DaysWidget = DaysWidget('123456', self)
+        self.days.setEnabled(False)
+        layout.addWidget(self.days, 4, 1, 1, 3)
+
+        import_btn: QPushButton = QPushButton('Добавить', self)
+        import_btn.clicked.connect(self.accept)
+        layout.addWidget(import_btn, 5, 0, 1, 4)
+
+    def set_mode(self, mode: str) -> None:
+        if mode == 'Один раз':
+            self.date_edit.setEnabled(True)
+            self.days.setEnabled(False)
+        else:
+            self.date_edit.setEnabled(False)
+            self.days.setEnabled(True)
+
+    def browse_file(self) -> None:
+        """Открывает диалог выбора файла."""
+        file_path, _ = QFileDialog.getOpenFileName(self, 'Выбрать файл', expanduser('~'), SUPPORTED_FILES)
+        if file_path:
+            self.file_line.setText(file_path)
+
+    def get_data(self) -> Optional[tuple[str, int], tuple[str, str, str]]:
+        """Возвращает путь к файлу и Unix timestamp, если все поля заполнены."""
+        file_path: str = self.file_line.text().strip()
+        if not file_path:
+            QMessageBox.warning(self, 'Ошибка', 'Укажите путь к файлу.')
+            return None
+        if self.date_edit.isEnabled():
+            return file_path, self.time_edit.time().toString(), self.date_edit.date().toString('dd.MM.yyyy')
+        return file_path, self.time_edit.time().toString(), 'd' + self.days.get_days()
+
+
+class TimedSettings(QDialog):
+    """Диалог настроек элемента плейлиста по времени."""
+    def __init__(self, item: TimedPlaylistItem, parent: TimedPlaylist) -> None:
+        super().__init__(parent)
+        self.setWindowTitle(f'Настройки: {basename(item.file_path)}')
+        self.item = item
+        self.parent = parent
+        self.setModal(True)
+
+        layout = QGridLayout(self)
+        self.setLayout(layout)
+
+        self.file_label = QLabel('Файл:', self)
+        layout.addWidget(self.file_label, 0, 0)
+        self.file_line = QLineEdit(self.item.file_path, self)
+        self.file_line.setReadOnly(True)
+        layout.addWidget(self.file_line, 0, 1, 1, 3)
+
+        self.mode_combo = QComboBox(self)
+        self.mode_combo.addItem('Один раз')
+        self.mode_combo.addItem('Повторять')
+        if self.item.days.startswith('d'):
+            self.mode_combo.setCurrentText('Повторять')
+        else:
+            self.mode_combo.setCurrentText('Один раз')
+        self.mode_combo.currentTextChanged.connect(self.toggle_mode)
+        layout.addWidget(self.mode_combo, 1, 0, 1, 2)
+
+        self.date_label = QLabel('Дата:', self)
+        layout.addWidget(self.date_label, 2, 0)
+        self.date_edit = QDateEdit(self)
+        if not self.item.days.startswith('d'):
+            try:
+                self.date_edit.setDate(QDate.fromString(self.item.days, 'dd.MM.yyyy'))
+            except Exception:
+                self.date_edit.setDate(QDate.currentDate())
+        else:
+            self.date_edit.setDate(QDate.currentDate())
+        self.date_edit.setEnabled(not self.item.days.startswith('d'))
+        layout.addWidget(self.date_edit, 2, 1, 1, 3)
+
+        self.time_label = QLabel('Время:', self)
+        layout.addWidget(self.time_label, 3, 0)
+        self.time_edit = QTimeEdit(self)
+        self.time_edit.setDisplayFormat('HH:mm:ss')
+        self.time_edit.setTime(QTime.fromString(self.item.time, 'HH:mm:ss'))
+        layout.addWidget(self.time_edit, 3, 1, 1, 3)
+
+        self.days_label = QLabel('Дни:', self)
+        layout.addWidget(self.days_label, 4, 0)
+        self.days_widget = DaysWidget(self.item.days[1:] if self.item.days.startswith('d') else '123456', self)
+        self.days_widget.setEnabled(self.item.days.startswith('d'))
+        layout.addWidget(self.days_widget, 4, 1, 1, 3)
+
+        self.save_btn = QPushButton('Сохранить', self)
+        self.save_btn.clicked.connect(self.accept)
+        layout.addWidget(self.save_btn, 5, 0, 1, 4)
+
+    def toggle_mode(self, mode: str) -> None:
+        """Переключает видимость/доступность даты и дней."""
+        if mode == 'Один раз':
+            self.date_edit.setEnabled(True)
+            self.days_widget.setEnabled(False)
+        else:
+            self.date_edit.setEnabled(False)
+            self.days_widget.setEnabled(True)
+
+    def accept(self) -> None:
+        """Сохраняет изменения в элементе перед закрытием."""
+        if self.mode_combo.currentText() == 'Один раз':
+            self.item.days = self.date_edit.date().toString('dd.MM.yyyy')
+        else:
+            self.item.days = 'd' + self.days_widget.get_days()
+        self.item.time = self.time_edit.time().toString()
+        self.item.setText(
+            f"{basename(self.item.file_path)} - повтор в {self.item.time}"
+            if self.item.days.startswith('d')
+            else f"{basename(self.item.file_path)} - {self.item.days} {self.item.time}"
+        )
+        self.parent.save_items()
+        super().accept()
+
+
+class TimedPlaylistItem(QListWidgetItem):
+    """Элемент списка timed плейлиста с файлом и временем."""
+
+    def __init__(self, file_path: str, time: str, days: str, parent: Optional[QWidget] = None) -> None:
+        super().__init__(parent)
+        self.file_path: str = file_path
+        self.time: str = time
+        self.days: str = days
+        if self.days.startswith('d'):
+            self.setText(f"{basename(file_path)} - повтор в {time}")
+        else:
+            self.setText(f"{basename(file_path)} - {days} {time}")
+
+
+class TimedPlaylist(QDockWidget):
+    """Виджет для плейлиста с заданным временем воспроизведения."""
+
+    def __init__(self, parent: Optional[QWidget] = None) -> None:
+        super().__init__(parent)
+        self.parent: Optional[MainWindow] = parent
+        self.setWindowTitle('Плейлист по времени')
+        self.setMinimumWidth(250)
+
+        self.table: QListWidget = QListWidget(self)
+        self.table.setMovement(QListWidget.Movement.Static)
+        self.table.contextMenuEvent = self.right_clicked
+        self.table.itemDoubleClicked.connect(lambda: TimedSettings(self.table.currentItem(), self).exec())
+
+        self.setWidget(self.table)
+        self.setAllowedAreas(Qt.DockWidgetArea.TopDockWidgetArea)
+        self.setFeatures(QDockWidget.DockWidgetFeature.DockWidgetMovable)
+
+        self.timer: QTimer = QTimer(self)
+        self.timer.timeout.connect(self.check_and_play)
+        self.timer.setInterval(1000)  # Проверка каждую секунду
+        self.timer.start()
+
+    def load_items(self) -> None:
+        """Загружает элементы из конфигурации."""
+        self.table.clear()
+        for entry in config.get('timed_playlist', []):
+            item: TimedPlaylistItem = TimedPlaylistItem(
+                entry['file'], entry['time'], entry['days'], self.table
+            )
+            self.table.addItem(item)
+
+    def save_items(self) -> None:
+        """Сохраняет элементы в конфигурацию."""
+        timed_list: List[Dict[str, Union[str, int]]] = []
+        for i in range(self.table.count()):
+            item: TimedPlaylistItem = self.table.item(i)
+            timed_list.append({
+                'file': item.file_path,
+                'time': item.time,
+                'days': item.days,
+            })
+        config['timed_playlist'] = timed_list
+        save_config()
+
+    def right_clicked(self, event: Any) -> None:
+        """Обработчик правого клика для контекстного меню."""
+        menu: QMenu = QMenu(self.table)
+        item: Optional[QListWidgetItem] = self.table.itemAt(event.pos())
+        if item:
+            edit_action: QAction = QAction('Изменить', self.table)
+            edit_action.triggered.connect(lambda: TimedSettings(item, self).exec())
+            menu.addAction(edit_action)
+            delete_action: QAction = QAction('Удалить', self.table)
+            delete_action.triggered.connect(lambda: self.delete_item(item))
+            menu.addAction(delete_action)
+            menu.addSeparator()
+        add_action: QAction = QAction('Добавить', self.table)
+        add_action.triggered.connect(self.add)
+        menu.addAction(add_action)
+        menu.popup(self.cursor().pos())
+        event.accept()
+
+    def add(self) -> None:
+        """Добавляет новый элемент через диалог импорта."""
+        dialog: TimedImportDialog = TimedImportDialog(self)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            data: Optional[tuple[str, str, str]] = dialog.get_data()
+            file_path, time, days = data
+            item: TimedPlaylistItem = TimedPlaylistItem(file_path, time, days, self.table)
+            self.table.addItem(item)
+            self.save_items()
+            logging.info(f'Added timed item: {file_path} at time {time} at days {days}')
+
+    def delete_item(self, item: TimedPlaylistItem) -> None:
+        """Удаляет элемент из списка."""
+        row: int = self.table.row(item)
+        self.table.takeItem(row)
+        self.save_items()
+        logging.info(f'Deleted timed item: {item.file_path}')
+
+    def check_and_play(self) -> None:
+        """Проверяет текущее время для автоматического воспроизведения."""
+        time = QTime.currentTime().toString()
+        day = QDate.currentDate().toString('dd.MM.yyyy')
+        week_day = str(QDate.currentDate().dayOfWeek())
+        for i in range(self.table.count() - 1, -1, -1):
+            item = self.table.item(i)
+            if item.time == time and not self.parent.player.isPlaying():
+                if item.days == day or (item.days.startswith('d') and week_day in item.days):
+                    self.parent.previous_song()
+                    self.parent.player.setSource(QUrl.fromLocalFile(item.file_path))
+                    self.parent.player.play()
+                    if not item.days.startswith('d'):
+                        self.table.takeItem(i)
+                        self.save_items()
+                    logging.info(f'Playing timed file: {item.file_path}')
+                    break
+
+
 class MainWindow(QMainWindow):
     """Главное окно приложения."""
 
@@ -708,7 +992,7 @@ class MainWindow(QMainWindow):
         self.setWindowTitle(f'Zvonki v{VERSION}')
         self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, config['top_hint'])
         self.setDockOptions(QMainWindow.DockOption.AnimatedDocks)
-        self.setMinimumSize(700, 320)
+        self.setMinimumSize(600, 320)
 
         self.player: QMediaPlayer = QMediaPlayer()
         self.audio: QAudioOutput = QAudioOutput()
@@ -721,6 +1005,7 @@ class MainWindow(QMainWindow):
 
         self.settings: Settings = Settings(self)
         self.schedule: Schedule = Schedule(self)
+        self.timed_playlist: TimedPlaylist = TimedPlaylist(self)
 
         self.menu: Actions = Actions(self)
         self.setMenuBar(self.menu)
@@ -737,6 +1022,7 @@ class MainWindow(QMainWindow):
         self.addDockWidget(Qt.DockWidgetArea.TopDockWidgetArea, self.volume_pr)
         self.addDockWidget(Qt.DockWidgetArea.TopDockWidgetArea, self.table)
         self.addDockWidget(Qt.DockWidgetArea.TopDockWidgetArea, self.schedule)
+        self.addDockWidget(Qt.DockWidgetArea.TopDockWidgetArea, self.timed_playlist)
         self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self.progress_bar)
 
         if config['sort_restart']:
@@ -744,6 +1030,7 @@ class MainWindow(QMainWindow):
         else:
             self.load_playlist()
         self.load_schedules()
+        self.timed_playlist.load_items()
 
         self.tray: QSystemTrayIcon = QSystemTrayIcon(self.windowIcon(), self)
         tray_menu: QMenu = QMenu(self)
@@ -807,10 +1094,7 @@ class MainWindow(QMainWindow):
 
     def open_songs(self) -> None:
         """Открывает диалог для добавления песен."""
-        files, _ = QFileDialog.getOpenFileNames(self, 'Добавить песни', '/',
-                                                'Аудиофайлы (*.mp3 *.wav *.ogg *.aac *.wma *.flac *.m4a *.ac3 *.eac3 *.alac *.opus);;'
-                                                'Видеофайлы (*.mp4 *.avi *.mkv *.wmv *.mov *.webm *.mpeg *.mpg *.vob *.ts *.m2ts *.3gp *.3g2 *.flv);;'
-                                                'Все файлы (*.*)')
+        files, _ = QFileDialog.getOpenFileNames(self, 'Добавить песни', '/', SUPPORTED_FILES)
         if files:
             for file in files:
                 self.add_song(file)
@@ -854,6 +1138,7 @@ class MainWindow(QMainWindow):
     def save_base_config(self) -> None:
         """Сохраняет базовую конфигурацию приложения."""
         config['volume'] = self.volume_pr.slider.value()
+        self.timed_playlist.save_items()
         for x in (self.schedule.table.item(i) for i in range(self.schedule.table.count())):
             if x.checkState() == Qt.CheckState.Checked:
                 config['schedules'][x.text()]['enabled'] = True
@@ -867,18 +1152,18 @@ class MainWindow(QMainWindow):
         logging.warning('Closing program')
         sys.exit()
 
-    def dragEnterEvent(self, a0: Any) -> None:
+    def dragEnterEvent(self, event: QDragEnterEvent) -> None:
         """Обрабатывает событие перетаскивания файлов."""
-        if a0.mimeData().hasUrls():
-            a0.accept()
+        if event.mimeData().hasUrls():
+            event.accept()
 
-    def dropEvent(self, a0: Any) -> None:
+    def dropEvent(self, event: QDropEvent) -> None:
         """Обрабатывает событие сброса файлов в окно."""
-        for url in map(lambda u: u.url().replace('file:///', ''), a0.mimeData().urls()):
+        for url in map(lambda u: u.url().replace('file:///', ''), event.mimeData().urls()):
             self.add_song(url)
             config['playlist'].append(url)
 
-    def closeEvent(self, event: Any) -> None:
+    def closeEvent(self, event: QCloseEvent) -> None:
         """Скрывает окно при закрытии, сохраняя конфигурацию."""
         self.save_base_config()
         self.hide()

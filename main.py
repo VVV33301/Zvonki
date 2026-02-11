@@ -7,6 +7,7 @@ from random import shuffle
 from re import findall
 import logging
 from typing import List, Dict, Union, Optional, Any
+
 from PyQt6.QtGui import QAction, QIcon, QCloseEvent, QDropEvent, QDragEnterEvent
 from PyQt6.QtWidgets import QApplication, QWidget, QListWidget, QListWidgetItem, QHBoxLayout, QVBoxLayout, QCheckBox, \
     QPushButton, QGridLayout, QDockWidget, QStyledItemDelegate, QMenu, QMessageBox, QDialog, QFileDialog, QLabel, \
@@ -16,6 +17,7 @@ from PyQt6.QtCore import Qt, QUrl, QTime, QTimer, QDate, pyqtSignal
 from PyQt6.QtMultimedia import QMediaPlayer, QAudioOutput, QAudioDecoder
 import psutil
 from pycaw.pycaw import AudioUtilities
+from pycaw.utils import AudioDevice
 
 VERSION: str = '2.10.1'
 CONFIG_PATH: str = expanduser('~') + '/.zvonki2/config.json'
@@ -32,7 +34,7 @@ if not exists(CONFIG_PATH):
 
 # Загрузка конфигурации из файла
 with open(CONFIG_PATH, encoding='utf-8') as config_file:
-    config: Dict[str, Union[str, int, bool, List[Union[str, List[str]]], Dict[str, Any]]] = json.load(config_file)
+    config: Dict[str, Any] = json.load(config_file)
 
 logging.basicConfig(filename=expanduser('~') + '/.zvonki2/work.log', level=logging.INFO,
                     format='%(asctime)s %(levelname)s - %(message)s')
@@ -72,6 +74,12 @@ def is_already_running() -> bool:
     return count > 1
 
 
+class DaysCheckBox(QCheckBox):
+    def __init__(self, data: str, parent: Optional[DaysWidget]):
+        super().__init__(parent)
+        self.data: str = data
+
+
 class DaysWidget(QWidget):
     """Виджет для выбора дней недели."""
     clicked: pyqtSignal = pyqtSignal(str)
@@ -82,8 +90,7 @@ class DaysWidget(QWidget):
         self.setLayout(layout)
 
         for i in range(1, 8):
-            item: QCheckBox = QCheckBox(self)
-            item.data: str = str(i)
+            item: DaysCheckBox = DaysCheckBox(str(i), self)
             if item.data in days:
                 item.setChecked(True)
             item.clicked.connect(self.on_click)
@@ -168,7 +175,7 @@ class PlaylistItem(QListWidgetItem):
 class PlaylistWidget(QDockWidget):
     """Виджет плейлиста с поддержкой перетаскивания и контекстного меню."""
 
-    def __init__(self, parent: Optional[QWidget] = None) -> None:
+    def __init__(self, parent: Optional[MainWindow] = None) -> None:
         super().__init__(parent=parent)
         self.parent: Optional[MainWindow] = parent
         self.setWindowTitle('Плейлист')
@@ -210,7 +217,7 @@ class PlaylistWidget(QDockWidget):
         menu.popup(self.cursor().pos())
         event.accept()
 
-    def delete(self, song: QListWidgetItem) -> None:
+    def delete(self, song: PlaylistItem) -> None:
         """Удаляет трек из плейлиста."""
         config['playlist'].remove(song.url)
         self.table.takeItem(self.table.row(song))
@@ -236,7 +243,7 @@ class PlaylistWidget(QDockWidget):
 class Settings(QDialog):
     """Диалог настроек приложения."""
 
-    def __init__(self, parent: Optional[QWidget] = None) -> None:
+    def __init__(self, parent: Optional[MainWindow] = None) -> None:
         super().__init__(parent=parent)
         self.parent: Optional[MainWindow] = parent
         self.setWindowTitle('Настройки')
@@ -289,8 +296,9 @@ class Settings(QDialog):
     def set_autorun(self) -> None:
         """Управляет настройкой автозапуска приложения."""
         if sys.platform == 'win32':
-            from winreg import HKEY_CURRENT_USER, KEY_ALL_ACCESS, REG_SZ, OpenKey, SetValueEx, DeleteValue
-            key = OpenKey(HKEY_CURRENT_USER, 'SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run', 0, KEY_ALL_ACCESS)
+            from winreg import HKEY_CURRENT_USER, KEY_ALL_ACCESS, REG_SZ, OpenKey, SetValueEx, DeleteValue, HKEYType
+            key: HKEYType = OpenKey(HKEY_CURRENT_USER, 'SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run',
+                                    0, KEY_ALL_ACCESS)
             if self.autorun.isChecked():
                 SetValueEx(key, 'Zvonki2', 0, REG_SZ, sys.argv[0])
             else:
@@ -304,7 +312,7 @@ class Settings(QDialog):
 class Actions(QMenuBar):
     """Меню приложения с действиями."""
 
-    def __init__(self, parent: MainWindow = None) -> None:
+    def __init__(self, parent: Optional[MainWindow]) -> None:
         super().__init__(parent=parent)
         self.parent: MainWindow = parent
 
@@ -358,7 +366,7 @@ class Actions(QMenuBar):
 class VolumeSlider(QDockWidget):
     """Виджет для управления громкостью приложения."""
 
-    def __init__(self, parent: Optional[QWidget] = None) -> None:
+    def __init__(self, parent: Optional[MainWindow] = None) -> None:
         super().__init__(parent=parent)
         self.parent: Optional[MainWindow] = parent
         self.setWindowTitle('Громкость')
@@ -398,7 +406,7 @@ class SystemVolumeSlider(VolumeSlider):
         super().__init__(parent=parent)
         self.setWindowTitle('Системная громкость')
 
-        devices = AudioUtilities.GetSpeakers()
+        devices: Optional[AudioDevice] = AudioUtilities.GetSpeakers()
         self.volume_object = devices.EndpointVolume
 
     def value_changed(self) -> None:
@@ -410,7 +418,7 @@ class SystemVolumeSlider(VolumeSlider):
 class Progress(QDockWidget):
     """Виджет для отображения прогресса воспроизведения и управления плеером."""
 
-    def __init__(self, parent: Optional[QWidget] = None) -> None:
+    def __init__(self, parent: Optional[MainWindow] = None) -> None:
         super().__init__(parent=parent)
         self.setWindowTitle('Медиа не загружено')
         self.parent: Optional[MainWindow] = parent
@@ -612,7 +620,7 @@ class ScheduleSettings(QDialog):
 class Schedule(QDockWidget):
     """Виджет управления расписаниями."""
 
-    def __init__(self, parent: Optional[QWidget] = None) -> None:
+    def __init__(self, parent: Optional[MainWindow] = None) -> None:
         super().__init__(parent)
         self.parent: Optional[MainWindow] = parent
         self.setWindowTitle('Расписание')
@@ -733,7 +741,7 @@ class TimedImportDialog(QDialog):
         browse_btn.clicked.connect(self.browse_file)
         layout.addWidget(browse_btn, 0, 3, 1, 1)
 
-        self.choose_mode = QComboBox(self)
+        self.choose_mode: QComboBox = QComboBox(self)
         self.choose_mode.addItem('Один раз')
         self.choose_mode.addItem('Повторять')
         self.choose_mode.currentTextChanged.connect(self.set_mode)
@@ -792,20 +800,20 @@ class TimedSettings(QDialog):
     def __init__(self, item: TimedPlaylistItem, parent: TimedPlaylist) -> None:
         super().__init__(parent)
         self.setWindowTitle(f'Настройки: {basename(item.file_path)}')
-        self.item = item
-        self.parent = parent
+        self.item: TimedPlaylistItem = item
+        self.parent: TimedPlaylist = parent
         self.setModal(True)
 
-        layout = QGridLayout(self)
+        layout: QGridLayout = QGridLayout(self)
         self.setLayout(layout)
 
-        self.file_label = QLabel('Файл:', self)
+        self.file_label: QLabel = QLabel('Файл:', self)
         layout.addWidget(self.file_label, 0, 0)
-        self.file_line = QLineEdit(self.item.file_path, self)
+        self.file_line: QLineEdit = QLineEdit(self.item.file_path, self)
         self.file_line.setReadOnly(True)
         layout.addWidget(self.file_line, 0, 1, 1, 3)
 
-        self.mode_combo = QComboBox(self)
+        self.mode_combo: QComboBox = QComboBox(self)
         self.mode_combo.addItem('Один раз')
         self.mode_combo.addItem('Повторять')
         if self.item.days.startswith('d'):
@@ -815,9 +823,9 @@ class TimedSettings(QDialog):
         self.mode_combo.currentTextChanged.connect(self.toggle_mode)
         layout.addWidget(self.mode_combo, 1, 0, 1, 2)
 
-        self.date_label = QLabel('Дата:', self)
+        self.date_label: QLabel = QLabel('Дата:', self)
         layout.addWidget(self.date_label, 2, 0)
-        self.date_edit = QDateEdit(self)
+        self.date_edit: QDateEdit = QDateEdit(self)
         if not self.item.days.startswith('d'):
             try:
                 self.date_edit.setDate(QDate.fromString(self.item.days, 'dd.MM.yyyy'))
@@ -828,20 +836,21 @@ class TimedSettings(QDialog):
         self.date_edit.setEnabled(not self.item.days.startswith('d'))
         layout.addWidget(self.date_edit, 2, 1, 1, 3)
 
-        self.time_label = QLabel('Время:', self)
+        self.time_label: QLabel = QLabel('Время:', self)
         layout.addWidget(self.time_label, 3, 0)
-        self.time_edit = QTimeEdit(self)
+        self.time_edit: QTimeEdit = QTimeEdit(self)
         self.time_edit.setDisplayFormat('HH:mm:ss')
         self.time_edit.setTime(QTime.fromString(self.item.time, 'HH:mm:ss'))
         layout.addWidget(self.time_edit, 3, 1, 1, 3)
 
-        self.days_label = QLabel('Дни:', self)
+        self.days_label: QLabel = QLabel('Дни:', self)
         layout.addWidget(self.days_label, 4, 0)
-        self.days_widget = DaysWidget(self.item.days[1:] if self.item.days.startswith('d') else '123456', self)
+        self.days_widget: DaysWidget = DaysWidget(
+            self.item.days[1:] if self.item.days.startswith('d') else '123456', self)
         self.days_widget.setEnabled(self.item.days.startswith('d'))
         layout.addWidget(self.days_widget, 4, 1, 1, 3)
 
-        self.save_btn = QPushButton('Сохранить', self)
+        self.save_btn: QPushButton = QPushButton('Сохранить', self)
         self.save_btn.clicked.connect(self.accept)
         layout.addWidget(self.save_btn, 5, 0, 1, 4)
 
@@ -932,7 +941,7 @@ class TimedPlaylist(QDockWidget):
     def right_clicked(self, event: Any) -> None:
         """Обработчик правого клика для контекстного меню."""
         menu: QMenu = QMenu(self.table)
-        item: Optional[QListWidgetItem] = self.table.itemAt(event.pos())
+        item: Optional[TimedPlaylistItem] = self.table.itemAt(event.pos())
         if item:
             edit_action: QAction = QAction('Изменить', self.table)
             edit_action.triggered.connect(lambda: TimedSettings(item, self).exec())
@@ -951,8 +960,7 @@ class TimedPlaylist(QDockWidget):
         """Добавляет новый элемент через диалог импорта."""
         dialog: TimedImportDialog = TimedImportDialog(self)
         if dialog.exec() == QDialog.DialogCode.Accepted:
-            data: Optional[tuple[str, str, str]] = dialog.get_data()
-            file_path, time, days = data
+            file_path, time, days = dialog.get_data()
             item: TimedPlaylistItem = TimedPlaylistItem(file_path, time, days, self.table)
             self.table.addItem(item)
             self.save_items()
@@ -967,11 +975,11 @@ class TimedPlaylist(QDockWidget):
 
     def check_and_play(self) -> None:
         """Проверяет текущее время для автоматического воспроизведения."""
-        time = QTime.currentTime().toString()
-        day = QDate.currentDate().toString('dd.MM.yyyy')
-        week_day = str(QDate.currentDate().dayOfWeek())
+        time: str = QTime.currentTime().toString()
+        day: str = QDate.currentDate().toString('dd.MM.yyyy')
+        week_day: str = str(QDate.currentDate().dayOfWeek())
         for i in range(self.table.count() - 1, -1, -1):
-            item = self.table.item(i)
+            item: TimedPlaylistItem = self.table.item(i)
             if item.time == time and not self.parent.player.isPlaying():
                 if item.days == day or (item.days.startswith('d') and week_day in item.days):
                     self.parent.previous_song()
@@ -1174,7 +1182,7 @@ if __name__ == '__main__':
     app: QApplication = QApplication(sys.argv)
     app.setWindowIcon(QIcon(resource_path('logo.ico')))
     if is_already_running():
-        msg = QMessageBox().question(None, 'Внимание!', 'Программа уже запущена!')
+        msg: QMessageBox = QMessageBox.question(None, 'Внимание!', 'Программа уже запущена!')
         sys.exit()
     window: MainWindow = MainWindow()
     window.show()
